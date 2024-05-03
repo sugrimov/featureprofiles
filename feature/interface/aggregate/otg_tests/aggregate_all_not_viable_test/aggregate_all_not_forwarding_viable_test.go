@@ -37,18 +37,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openconfig/ygot/ygot"
-        "github.com/open-traffic-generator/snappi/gosnappi"
+	"github.com/open-traffic-generator/snappi/gosnappi"
 	"github.com/openconfig/featureprofiles/internal/attrs"
 	"github.com/openconfig/featureprofiles/internal/deviations"
 	"github.com/openconfig/featureprofiles/internal/fptest"
 	"github.com/openconfig/featureprofiles/internal/gribi"
 	"github.com/openconfig/featureprofiles/internal/otgutils"
 	"github.com/openconfig/gribigo/fluent"
+	"github.com/openconfig/ondatra"
 	"github.com/openconfig/ondatra/gnmi"
 	"github.com/openconfig/ondatra/gnmi/oc"
 	"github.com/openconfig/ondatra/netutil"
-	"github.com/openconfig/ondatra"
+	"github.com/openconfig/ygot/ygot"
 )
 
 const (
@@ -77,8 +77,6 @@ const (
 
 type aggPortData struct {
 	dutIPv4       string
-	dutAggName    string
-	dutAggMAC     string
 	ateIPv4       string
 	dutIPv6       string
 	ateIPv6       string
@@ -150,13 +148,12 @@ var (
 		IPv6Len: 128,
 	}
 
-	pfx1AdvV4                = &ipAddr{ip: "100.0.1.0", prefix: 24}
-	pfx1AdvV6                = &ipAddr{ip: "2002:db8:64:64::0", prefix: 64}
-	pfx2AdvV4                = &ipAddr{ip: "100.0.2.0", prefix: 24}
-	pfx2AdvV6                = &ipAddr{ip: "2003:db8:64:64::0", prefix: 64}
-	pfx3AdvV4                = &ipAddr{ip: "100.0.3.0", prefix: 24}
-	pfx3AdvV6                = &ipAddr{ip: "2004:db8:64:64::0", prefix: 64}
-	pfx4AdvV4                = &ipAddr{ip: "100.0.4.0", prefix: 24}
+	pfx1AdvV4                = &ipAddr{ip: "100.0.1.1", prefix: 24}
+	pfx1AdvV6                = &ipAddr{ip: "2002:db8:64:64::1", prefix: 64}
+	pfx2AdvV4                = &ipAddr{ip: "100.0.2.1", prefix: 24}
+	pfx2AdvV6                = &ipAddr{ip: "2003:db8:64:64::1", prefix: 64}
+	pfx3AdvV4                = &ipAddr{ip: "100.0.3.1", prefix: 24}
+	pfx4AdvV4                = &ipAddr{ip: "100.0.4.1", prefix: 24}
 	pmd100GFRPorts           []string
 	dutPortList              []*ondatra.Port
 	atePortList              []*ondatra.Port
@@ -181,7 +178,6 @@ func TestAggregateAllNotForwardingViable(t *testing.T) {
 	top := configureATE(t, ate)
 	configureGRIBIClient(t, dut, ate, top)
 	flows := createFlows(t, top)
-
 	ate.OTG().PushConfig(t, top)
 	ate.OTG().StartProtocols(t)
 
@@ -191,7 +187,7 @@ func TestAggregateAllNotForwardingViable(t *testing.T) {
 
 	for _, agg := range []*aggPortData{agg1, agg2, agg3} {
 		bgpPath := gnmi.OC().NetworkInstance(deviations.DefaultNetworkInstance(dut)).Protocol(oc.PolicyTypes_INSTALL_PROTOCOL_TYPE_BGP, "BGP").Bgp()
-		gnmi.Await(t, dut, bgpPath.Neighbor(agg.ateLoopbackV4).SessionState().State(), time.Minute, oc.Bgp_Neighbor_SessionState_ESTABLISHED)
+		gnmi.Await(t, dut, bgpPath.Neighbor(agg.ateIPv4).SessionState().State(), time.Minute, oc.Bgp_Neighbor_SessionState_ESTABLISHED)
 	}
 
 	t.Logf("ISIS cost of LAG_2 lower then ISIS cost of LAG_3 Test-01")
@@ -509,23 +505,26 @@ func configureDUTBGP(t *testing.T, dut *ondatra.DUTDevice, aggIDs []string) {
 	}
 
 	for _, a := range []*aggPortData{agg1, agg2, agg3} {
-		bgpNbrV4 := bgp.GetOrCreateNeighbor(a.ateLoopbackV4)
+		bgpNbrV4 := bgp.GetOrCreateNeighbor(a.ateIPv4)
 		bgpNbrV4.PeerGroup = ygot.String(pgName)
 		bgpNbrV4.PeerAs = ygot.Uint32(asn)
 		bgpNbrV4.Enabled = ygot.Bool(true)
 		bgpNbrV4T := bgpNbrV4.GetOrCreateTransport()
-		bgpNbrV4T.LocalAddress = ygot.String(dutLoopback.IPv4)
+
+		bgpNbrV4T.LocalAddress = ygot.String(a.dutIPv4)
 		af4 := bgpNbrV4.GetOrCreateAfiSafi(oc.BgpTypes_AFI_SAFI_TYPE_IPV4_UNICAST)
 		af4.Enabled = ygot.Bool(true)
+
 		af6 := bgpNbrV4.GetOrCreateAfiSafi(oc.BgpTypes_AFI_SAFI_TYPE_IPV6_UNICAST)
 		af6.Enabled = ygot.Bool(false)
 
-		bgpNbrV6 := bgp.GetOrCreateNeighbor(a.ateLoopbackV6)
+		bgpNbrV6 := bgp.GetOrCreateNeighbor(a.ateIPv6)
 		bgpNbrV6.PeerGroup = ygot.String(pgName)
 		bgpNbrV6.PeerAs = ygot.Uint32(asn)
 		bgpNbrV6.Enabled = ygot.Bool(true)
 		bgpNbrV6T := bgpNbrV6.GetOrCreateTransport()
-		bgpNbrV6T.LocalAddress = ygot.String(dutLoopback.IPv6)
+
+		bgpNbrV6T.LocalAddress = ygot.String(a.dutIPv6)
 		af4 = bgpNbrV6.GetOrCreateAfiSafi(oc.BgpTypes_AFI_SAFI_TYPE_IPV4_UNICAST)
 		af4.Enabled = ygot.Bool(false)
 		af6 = bgpNbrV6.GetOrCreateAfiSafi(oc.BgpTypes_AFI_SAFI_TYPE_IPV6_UNICAST)
@@ -692,17 +691,19 @@ func configureOTGPorts(t *testing.T, ate *ondatra.ATEDevice, top gosnappi.Config
 		lagPort.Ethernet().SetMac(newMac).SetName(a.ateAggName + "." + strconv.Itoa(aggIdx))
 		lagPort.Lacp().SetActorActivity("active").SetActorPortNumber(uint32(aggIdx) + 1).SetActorPortPriority(1).SetLacpduTimeout(0)
 	}
-	configureOTGISIS(t, lagDev, a)
+	// configureOTGISIS(t, lagDev, a)
 	if a.ateAggName == LAG1 {
+		configureOTGISIS(t, lagDev, a, pfx1AdvV4)
 		configureOTGBGP(t, lagDev, a, pfx1AdvV4, pfx1AdvV6)
 	} else {
+		configureOTGISIS(t, lagDev, a, pfx2AdvV4)
 		configureOTGBGP(t, lagDev, a, pfx2AdvV4, pfx2AdvV6)
 	}
 	return pmd100GFRPorts
 }
 
 // configureOTGISIS configure ISIS on ATE
-func configureOTGISIS(t *testing.T, dev gosnappi.Device, agg *aggPortData) {
+func configureOTGISIS(t *testing.T, dev gosnappi.Device, agg *aggPortData, advV4 *ipAddr) {
 	t.Helper()
 	isis := dev.Isis().SetSystemId(agg.ateISISSysID).SetName(agg.ateAggName + ".ISIS")
 	isis.Basic().SetHostname(isis.Name())
@@ -717,49 +718,39 @@ func configureOTGISIS(t *testing.T, dev gosnappi.Device, agg *aggPortData) {
 
 	devIsisRoutes4 := isis.V4Routes().Add().SetName(agg.ateAggName + ".isisnet4").SetLinkMetric(10)
 	devIsisRoutes4.Addresses().Add().
-		SetAddress(agg.ateLoopbackV4).SetPrefix(32).SetCount(1).SetStep(1)
-
-	devIsisRoutes6 := isis.V6Routes().Add().SetName(agg.ateAggName + ".isisnet6").SetLinkMetric(10)
-	devIsisRoutes6.Addresses().Add().
-		SetAddress(agg.ateLoopbackV6).SetPrefix(128).SetCount(1).SetStep(1)
+		SetAddress(advV4.ip).SetPrefix(advV4.prefix).SetCount(1).SetStep(1)
 
 }
 
 // configureOTGBGP configure BGP on ATE
 func configureOTGBGP(t *testing.T, dev gosnappi.Device, agg *aggPortData, advV4, advV6 *ipAddr) {
 	t.Helper()
-	v4 := dev.Ipv4Loopbacks().Items()[0]
-	v6 := dev.Ipv6Loopbacks().Items()[0]
 
 	iDutBgp := dev.Bgp().SetRouterId(agg.ateIPv4)
-	iDutBgp4Peer := iDutBgp.Ipv4Interfaces().Add().SetIpv4Name(v4.Name()).Peers().Add().SetName(agg.ateAggName + ".BGP4.peer")
-	iDutBgp4Peer.SetPeerAddress(dutLoopback.IPv4).SetAsNumber(asn).SetAsType(gosnappi.BgpV4PeerAsType.IBGP)
+	iDutBgp4Peer := iDutBgp.Ipv4Interfaces().Add().SetIpv4Name(agg.ateAggName + ".IPv4").Peers().Add().SetName(agg.ateAggName + ".BGP4.peer")
+	iDutBgp4Peer.SetPeerAddress(agg.dutIPv4).SetAsNumber(asn).SetAsType(gosnappi.BgpV4PeerAsType.IBGP)
 	iDutBgp4Peer.Capability().SetIpv4UnicastAddPath(true).SetIpv6UnicastAddPath(false)
 	iDutBgp4Peer.LearnedInformationFilter().SetUnicastIpv4Prefix(true).SetUnicastIpv6Prefix(false)
 
-	iDutBgp6Peer := iDutBgp.Ipv6Interfaces().Add().SetIpv6Name(v6.Name()).Peers().Add().SetName(agg.ateAggName + ".BGP6.peer")
-	iDutBgp6Peer.SetPeerAddress(dutLoopback.IPv6).SetAsNumber(asn).SetAsType(gosnappi.BgpV6PeerAsType.IBGP)
+	iDutBgp6Peer := iDutBgp.Ipv6Interfaces().Add().SetIpv6Name(agg.ateAggName + ".IPv6").Peers().Add().SetName(agg.ateAggName + ".BGP6.peer")
+	iDutBgp6Peer.SetPeerAddress(agg.dutIPv6).SetAsNumber(asn).SetAsType(gosnappi.BgpV6PeerAsType.IBGP)
 	iDutBgp6Peer.Capability().SetIpv4UnicastAddPath(false).SetIpv6UnicastAddPath(true)
 	iDutBgp6Peer.LearnedInformationFilter().SetUnicastIpv4Prefix(false).SetUnicastIpv6Prefix(true)
 
 	bgpNeti1Bgp4PeerRoutes := iDutBgp4Peer.V4Routes().Add().SetName(agg.ateAggName + ".BGP4.Route")
-	bgpNeti1Bgp4PeerRoutes.SetNextHopIpv4Address(agg.ateLoopbackV4).
-		SetNextHopAddressType(gosnappi.BgpV4RouteRangeNextHopAddressType.IPV4).
-		SetNextHopMode(gosnappi.BgpV4RouteRangeNextHopMode.MANUAL)
-	bgpNeti1Bgp4PeerRoutes.Addresses().Add().SetAddress(advV4.ip).SetPrefix(advV4.prefix).SetCount(1)
-	bgpNeti1Bgp4PeerRoutes.AddPath().SetPathId(1)
-
-	bgpNeti1Bgp6PeerRoutes := iDutBgp6Peer.V6Routes().Add().SetName(agg.ateAggName + ".BGP6.Route")
-	bgpNeti1Bgp6PeerRoutes.Addresses().Add().SetAddress(advV6.ip).SetPrefix(advV6.prefix).SetCount(1)
-	bgpNeti1Bgp6PeerRoutes.AddPath().SetPathId(1)
-
 	if agg.ateAggName != LAG1 {
+		bgpNeti1Bgp4PeerRoutes.SetNextHopIpv4Address(pfx2AdvV4.ip).
+			SetNextHopAddressType(gosnappi.BgpV4RouteRangeNextHopAddressType.IPV4).
+			SetNextHopMode(gosnappi.BgpV4RouteRangeNextHopMode.MANUAL)
 		bgpNeti1Bgp4PeerRoutes.Addresses().Add().SetAddress(pfx3AdvV4.ip).SetPrefix(pfx3AdvV4.prefix).SetCount(1)
 		bgpNeti1Bgp4PeerRoutes.AddPath().SetPathId(1)
+	} else {
+		bgpNeti1Bgp4PeerRoutes.SetNextHopIpv4Address(agg.ateIPv4).
+			SetNextHopAddressType(gosnappi.BgpV4RouteRangeNextHopAddressType.IPV4).
+			SetNextHopMode(gosnappi.BgpV4RouteRangeNextHopMode.MANUAL)
 
-		bgpNeti1Bgp6PeerRoutes.Addresses().Add().SetAddress(pfx3AdvV6.ip).SetPrefix(pfx3AdvV6.prefix).SetCount(1)
-		bgpNeti1Bgp6PeerRoutes.AddPath().SetPathId(1)
 	}
+
 }
 
 // forwardingViableEnable set to False on Port

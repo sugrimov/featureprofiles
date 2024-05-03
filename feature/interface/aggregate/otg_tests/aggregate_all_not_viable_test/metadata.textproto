@@ -3,7 +3,7 @@
 
 uuid: "2beaac46-9b7b-49c4-9bde-62ad530aa5c6"
 plan_id: "RT-5.7"
-description: "Aggregate All Not Forwarding Viable"
+description: "Aggregate Not Viable All"
 testbed: TESTBED_DUT_ATE_8LINKS
 platform_exceptions: {
   platform: {
