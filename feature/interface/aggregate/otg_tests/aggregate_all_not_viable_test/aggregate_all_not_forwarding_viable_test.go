@@ -47,7 +47,9 @@ import (
 	"github.com/openconfig/ondatra"
 	"github.com/openconfig/ondatra/gnmi"
 	"github.com/openconfig/ondatra/gnmi/oc"
+	"github.com/openconfig/ondatra/gnmi/oc/ocpath"
 	"github.com/openconfig/ondatra/netutil"
+	"github.com/openconfig/ygnmi/ygnmi"
 	"github.com/openconfig/ygot/ygot"
 )
 
@@ -153,6 +155,7 @@ var (
 	pfx2AdvV4                = &ipAddr{ip: "100.0.2.1", prefix: 24}
 	pfx2AdvV6                = &ipAddr{ip: "2003:db8:64:64::1", prefix: 64}
 	pfx3AdvV4                = &ipAddr{ip: "100.0.3.1", prefix: 24}
+	pfx3AdvV6                = &ipAddr{ip: "2004:db8:64:64::1", prefix: 64}
 	pfx4AdvV4                = &ipAddr{ip: "100.0.4.1", prefix: 24}
 	pmd100GFRPorts           []string
 	dutPortList              []*ondatra.Port
@@ -186,7 +189,7 @@ func TestAggregateAllNotForwardingViable(t *testing.T) {
 	}
 
 	for _, agg := range []*aggPortData{agg1, agg2, agg3} {
-		bgpPath := gnmi.OC().NetworkInstance(deviations.DefaultNetworkInstance(dut)).Protocol(oc.PolicyTypes_INSTALL_PROTOCOL_TYPE_BGP, "BGP").Bgp()
+		bgpPath := ocpath.Root().NetworkInstance(deviations.DefaultNetworkInstance(dut)).Protocol(oc.PolicyTypes_INSTALL_PROTOCOL_TYPE_BGP, "BGP").Bgp()
 		gnmi.Await(t, dut, bgpPath.Neighbor(agg.ateIPv4).SessionState().State(), time.Minute, oc.Bgp_Neighbor_SessionState_ESTABLISHED)
 	}
 
@@ -205,15 +208,25 @@ func TestAggregateAllNotForwardingViable(t *testing.T) {
 	})
 	t.Run("Running Testcase for TestID RT-5.7.1.2", func(t *testing.T) {
 		t.Logf("Setting Forwarding-Viable to False on all the Member Ports of LAG2")
+		// Ensure ISIS Adjacency is up on LAG_2
+		if ok := awaitAdjacency(t, dut, aggIDs[1]); !ok {
+			t.Fatal("ISIS Adjacency is Down on LAG_2")
+		}
 		forwardingViableDisable(t, dut, 2, 3)
+		time.Sleep(time.Minute)
+		// Ensure ISIS Adjacency is Down on LAG_2
+		if ok := awaitAdjacency(t, dut, aggIDs[1]); ok {
+			t.Fatal("ISIS Adjacency is Established on LAG_2")
+		}
 		otgutils.WaitForARP(t, ate.OTG(), top, "IPv4")
+
 		startTraffic(t, dut, ate, top)
-		checkBidirectionalTraffic(t, dut, dutPortList[5:6])
 		confirmNonViableForwardingTraffic(t, dut, ate, atePortList[1:6], dutPortList[1:6])
+		// Ensure that traffic from ATE port1 to pfx4 are discarded on DUT
 		verifyTrafficFlow(t, ate, flows[1:2])
-		// Ensure there is no traffic received/transmiited on DUT LAG_3
-		if got := validateLagTraffic(t, dut, ate, dutPortList); got == false {
-			t.Fatal("Packets are not Received and Transmitted on LAG_3")
+		// Ensure there is no traffic received on DUT LAG_3
+		if got := validateLagTraffic(t, dut, ate, dutPortList); got == true {
+			t.Fatal("Packets are Received on DUT LAG_3")
 		}
 
 		verifyTrafficFlow(t, ate, flows[0:1])
@@ -259,15 +272,24 @@ func TestAggregateAllNotForwardingViable(t *testing.T) {
 
 	t.Run("Running Testcase for TestID RT-5.7.2.2", func(t *testing.T) {
 		t.Logf("Setting Forwarding-Viable to False on all the Member Ports of LAG2")
+		// Ensure ISIS Adjacency is up on LAG_2
+		if ok := awaitAdjacency(t, dut, aggIDs[1]); !ok {
+			t.Fatal("ISIS Adjacency is Down on LAG_2")
+		}
 		forwardingViableDisable(t, dut, 2, 3)
+		time.Sleep(time.Minute)
+		// Ensure ISIS Adjacency is Down on LAG_2
+		if ok := awaitAdjacency(t, dut, aggIDs[1]); ok {
+			t.Fatal("ISIS Adjacency is Established on LAG_2")
+		}
 		otgutils.WaitForARP(t, ate.OTG(), top, "IPv4")
 		startTraffic(t, dut, ate, top)
-		checkBidirectionalTraffic(t, dut, dutPortList[5:6])
 		confirmNonViableForwardingTraffic(t, dut, ate, atePortList[1:6], dutPortList[1:6])
+		// Ensure that traffic from ATE port1 to pfx4 are discarded on DUT
 		verifyTrafficFlow(t, ate, flows[1:2])
-		// Ensure there is no traffic received/transmiited on DUT LAG_3
+		// Ensure there is traffic received on DUT LAG_3
 		if got := validateLagTraffic(t, dut, ate, dutPortList); got == false {
-			t.Fatal("Packets are not Received and Transmitted on LAG_3")
+			t.Fatal("Packets are not Received on LAG_3")
 		}
 		verifyTrafficFlow(t, ate, flows[0:1])
 	})
@@ -587,9 +609,6 @@ func configureDUTISIS(t *testing.T, dut *ondatra.DUTDevice, aggIDs []string) {
 		isisIntfLevel := isisIntf.GetOrCreateLevel(2)
 		isisIntfLevel.Enabled = ygot.Bool(true)
 
-		isisIntfLevel.GetOrCreateTimers().HelloInterval = ygot.Uint32(60)
-		isisIntfLevel.GetOrCreateTimers().HelloMultiplier = ygot.Uint8(5)
-
 		isisIntfLevelAfiv4 := isisIntfLevel.GetOrCreateAf(oc.IsisTypes_AFI_TYPE_IPV4, oc.IsisTypes_SAFI_TYPE_UNICAST)
 
 		isisIntfLevelAfiv4.Enabled = ygot.Bool(true)
@@ -896,7 +915,7 @@ func verifyTrafficFlow(t *testing.T, ate *ondatra.ATEDevice, flows []gosnappi.Fl
 	if flows[0].Name() == "pfx1ToPfx4" {
 		rxPkts := gnmi.Get(t, ate.OTG(), gnmi.OTG().Flow(flows[0].Name()).Counters().InPkts().State())
 		if got := rxPkts / 100; got == 0 {
-			t.Logf("No Packet received, LossPct for flow %s: got %d, want 0 packet", flows[0].Name(), got)
+			t.Logf("Packet Dropped, LossPct for flow %s: got %d, want 0 packet", flows[0].Name(), got)
 		} else {
 			t.Fatalf("Packet received for flow %s: got %d, want 0 packet", flows[0].Name(), got)
 		}
@@ -910,6 +929,19 @@ func verifyTrafficFlow(t *testing.T, ate *ondatra.ATEDevice, flows []gosnappi.Fl
 			}
 		}
 	}
+}
+
+func awaitAdjacency(t *testing.T, dut *ondatra.DUTDevice, intfName string) bool {
+	isisPath := gnmi.OC().NetworkInstance(deviations.DefaultNetworkInstance(dut)).Protocol(oc.PolicyTypes_INSTALL_PROTOCOL_TYPE_ISIS, isisInstance).Isis()
+	intf := isisPath.Interface(intfName)
+
+	query := intf.LevelAny().AdjacencyAny().AdjacencyState().State()
+	_, ok := gnmi.WatchAll(t, dut, query, time.Minute, func(val *ygnmi.Value[oc.E_Isis_IsisInterfaceAdjState]) bool {
+		v, ok := val.Val()
+		return v == oc.Isis_IsisInterfaceAdjState_UP && ok
+	}).Await(t)
+
+	return ok
 }
 
 // checkBidirectionalTraffic verify the bidirectional traffic on DUT ports.
