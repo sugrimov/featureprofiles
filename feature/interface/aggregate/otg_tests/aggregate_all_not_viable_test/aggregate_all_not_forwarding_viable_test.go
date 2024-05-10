@@ -78,16 +78,14 @@ const (
 )
 
 type aggPortData struct {
-	dutIPv4       string
-	ateIPv4       string
-	dutIPv6       string
-	ateIPv6       string
-	ateAggName    string
-	ateAggMAC     string
-	ateISISSysID  string
-	ateLoopbackV4 string
-	ateLoopbackV6 string
-	ateLagCount   uint32
+	dutIPv4      string
+	ateIPv4      string
+	dutIPv6      string
+	ateIPv6      string
+	ateAggName   string
+	ateAggMAC    string
+	ateISISSysID string
+	ateLagCount  uint32
 }
 
 type ipAddr struct {
@@ -106,40 +104,34 @@ type testArgs struct {
 
 var (
 	agg1 = &aggPortData{
-		dutIPv4:       "192.0.2.1",
-		ateIPv4:       "192.0.2.2",
-		dutIPv6:       "2001:db8::1",
-		ateIPv6:       "2001:db8::2",
-		ateAggName:    LAG1,
-		ateAggMAC:     "02:00:01:01:01:01",
-		ateISISSysID:  "640000000002",
-		ateLoopbackV4: "192.0.2.17",
-		ateLoopbackV6: "2001:db8::17",
-		ateLagCount:   1,
+		dutIPv4:      "192.0.2.1",
+		ateIPv4:      "192.0.2.2",
+		dutIPv6:      "2001:db8::1",
+		ateIPv6:      "2001:db8::2",
+		ateAggName:   LAG1,
+		ateAggMAC:    "02:00:01:01:01:01",
+		ateISISSysID: "640000000002",
+		ateLagCount:  1,
 	}
 	agg2 = &aggPortData{
-		dutIPv4:       "192.0.2.5",
-		ateIPv4:       "192.0.2.6",
-		dutIPv6:       "2001:db8::5",
-		ateIPv6:       "2001:db8::6",
-		ateAggName:    LAG2,
-		ateAggMAC:     "02:00:01:01:02:01",
-		ateISISSysID:  "640000000003",
-		ateLoopbackV4: "192.0.2.18",
-		ateLoopbackV6: "2001:db8::18",
-		ateLagCount:   5,
+		dutIPv4:      "192.0.2.5",
+		ateIPv4:      "192.0.2.6",
+		dutIPv6:      "2001:db8::5",
+		ateIPv6:      "2001:db8::6",
+		ateAggName:   LAG2,
+		ateAggMAC:    "02:00:01:01:02:01",
+		ateISISSysID: "640000000003",
+		ateLagCount:  5,
 	}
 	agg3 = &aggPortData{
-		dutIPv4:       "192.0.2.9",
-		ateIPv4:       "192.0.2.10",
-		dutIPv6:       "2001:db8::9",
-		ateIPv6:       "2001:db8::a",
-		ateAggName:    LAG3,
-		ateAggMAC:     "02:00:01:01:03:01",
-		ateISISSysID:  "640000000004",
-		ateLoopbackV4: "192.0.2.18",
-		ateLoopbackV6: "2001:db8::18",
-		ateLagCount:   2,
+		dutIPv4:      "192.0.2.9",
+		ateIPv4:      "192.0.2.10",
+		dutIPv6:      "2001:db8::9",
+		ateIPv6:      "2001:db8::a",
+		ateAggName:   LAG3,
+		ateAggMAC:    "02:00:01:01:03:01",
+		ateISISSysID: "640000000004",
+		ateLagCount:  2,
 	}
 
 	dutLoopback = attrs.Attributes{
@@ -155,7 +147,6 @@ var (
 	pfx2AdvV4                = &ipAddr{ip: "100.0.2.1", prefix: 24}
 	pfx2AdvV6                = &ipAddr{ip: "2003:db8:64:64::1", prefix: 64}
 	pfx3AdvV4                = &ipAddr{ip: "100.0.3.1", prefix: 24}
-	pfx3AdvV6                = &ipAddr{ip: "2004:db8:64:64::1", prefix: 64}
 	pfx4AdvV4                = &ipAddr{ip: "100.0.4.1", prefix: 24}
 	pmd100GFRPorts           []string
 	dutPortList              []*ondatra.Port
@@ -310,8 +301,6 @@ func configureDUT(t *testing.T, dut *ondatra.DUTDevice) []string {
 	t.Helper()
 	fptest.ConfigureDefaultNetworkInstance(t, dut)
 
-	configureDUTLoopback(t, dut)
-
 	var aggIDs []string
 	for _, a := range []*aggPortData{agg1, agg2, agg3} {
 		d := gnmi.OC()
@@ -356,41 +345,17 @@ func configureDUT(t *testing.T, dut *ondatra.DUTDevice) []string {
 			fptest.LogQuery(t, port.String(), iPath.Config(), i)
 			gnmi.Replace(t, dut, iPath.Config(), i)
 		}
+
+		if deviations.ExplicitPortSpeed(dut) {
+			for _, dp := range portList {
+				fptest.SetPortSpeed(t, dp)
+			}
+		}
 	}
 	configureRoutingPolicy(t, dut)
 	configureDUTISIS(t, dut, aggIDs)
 	configureDUTBGP(t, dut, aggIDs)
 	return aggIDs
-}
-
-// configureDUTLoopback configures DUT loopback
-func configureDUTLoopback(t *testing.T, dut *ondatra.DUTDevice) {
-	t.Helper()
-	lb := netutil.LoopbackInterface(t, dut, 0)
-	lo0 := gnmi.OC().Interface(lb).Subinterface(0)
-	ipv4Addrs := gnmi.LookupAll(t, dut, lo0.Ipv4().AddressAny().State())
-	ipv6Addrs := gnmi.LookupAll(t, dut, lo0.Ipv6().AddressAny().State())
-	foundV4 := false
-	for _, ip := range ipv4Addrs {
-		if v, ok := ip.Val(); ok {
-			foundV4 = true
-			dutLoopback.IPv4 = v.GetIp()
-			break
-		}
-	}
-	foundV6 := false
-	for _, ip := range ipv6Addrs {
-		if v, ok := ip.Val(); ok {
-			foundV6 = true
-			dutLoopback.IPv6 = v.GetIp()
-			break
-		}
-	}
-	if !foundV4 || !foundV6 {
-		lo1 := dutLoopback.NewOCInterface(lb, dut)
-		lo1.Type = oc.IETFInterfaces_InterfaceType_softwareLoopback
-		gnmi.Update(t, dut, gnmi.OC().Interface(lb).Config(), lo1)
-	}
 }
 
 // configDstMemberDUT enables destination ports, add other details like description,
@@ -695,8 +660,7 @@ func configureOTGPorts(t *testing.T, ate *ondatra.ATEDevice, top gosnappi.Config
 	lagEth.Connection().SetLagName(agg.Name())
 	lagEth.Ipv4Addresses().Add().SetName(agg.Name() + ".IPv4").SetAddress(a.ateIPv4).SetGateway(a.dutIPv4).SetPrefix(ipv4PLen)
 	lagEth.Ipv6Addresses().Add().SetName(agg.Name() + ".IPv6").SetAddress(a.ateIPv6).SetGateway(a.dutIPv6).SetPrefix(ipv6PLen)
-	lagDev.Ipv4Loopbacks().Add().SetName(agg.Name() + ".Loopback4").SetEthName(lagEth.Name()).SetAddress(a.ateLoopbackV4)
-	lagDev.Ipv6Loopbacks().Add().SetName(agg.Name() + ".Loopback6").SetEthName(lagEth.Name()).SetAddress(a.ateLoopbackV6)
+
 	for aggIdx, pList := range portList {
 		top.Ports().Add().SetName(pList.ID())
 		if pList.PMD() == ondatra.PMD100GBASEFR {
@@ -748,12 +712,10 @@ func configureOTGBGP(t *testing.T, dev gosnappi.Device, agg *aggPortData, advV4,
 	iDutBgp := dev.Bgp().SetRouterId(agg.ateIPv4)
 	iDutBgp4Peer := iDutBgp.Ipv4Interfaces().Add().SetIpv4Name(agg.ateAggName + ".IPv4").Peers().Add().SetName(agg.ateAggName + ".BGP4.peer")
 	iDutBgp4Peer.SetPeerAddress(agg.dutIPv4).SetAsNumber(asn).SetAsType(gosnappi.BgpV4PeerAsType.IBGP)
-	iDutBgp4Peer.Capability().SetIpv4UnicastAddPath(true).SetIpv6UnicastAddPath(false)
 	iDutBgp4Peer.LearnedInformationFilter().SetUnicastIpv4Prefix(true).SetUnicastIpv6Prefix(false)
 
 	iDutBgp6Peer := iDutBgp.Ipv6Interfaces().Add().SetIpv6Name(agg.ateAggName + ".IPv6").Peers().Add().SetName(agg.ateAggName + ".BGP6.peer")
 	iDutBgp6Peer.SetPeerAddress(agg.dutIPv6).SetAsNumber(asn).SetAsType(gosnappi.BgpV6PeerAsType.IBGP)
-	iDutBgp6Peer.Capability().SetIpv4UnicastAddPath(false).SetIpv6UnicastAddPath(true)
 	iDutBgp6Peer.LearnedInformationFilter().SetUnicastIpv4Prefix(false).SetUnicastIpv6Prefix(true)
 
 	bgpNeti1Bgp4PeerRoutes := iDutBgp4Peer.V4Routes().Add().SetName(agg.ateAggName + ".BGP4.Route")
@@ -762,7 +724,6 @@ func configureOTGBGP(t *testing.T, dev gosnappi.Device, agg *aggPortData, advV4,
 			SetNextHopAddressType(gosnappi.BgpV4RouteRangeNextHopAddressType.IPV4).
 			SetNextHopMode(gosnappi.BgpV4RouteRangeNextHopMode.MANUAL)
 		bgpNeti1Bgp4PeerRoutes.Addresses().Add().SetAddress(pfx3AdvV4.ip).SetPrefix(pfx3AdvV4.prefix).SetCount(1)
-		bgpNeti1Bgp4PeerRoutes.AddPath().SetPathId(1)
 	} else {
 		bgpNeti1Bgp4PeerRoutes.SetNextHopIpv4Address(agg.ateIPv4).
 			SetNextHopAddressType(gosnappi.BgpV4RouteRangeNextHopAddressType.IPV4).
@@ -890,11 +851,11 @@ func configureGRIBIClient(t *testing.T, dut *ondatra.DUTDevice, ate *ondatra.ATE
 func startTraffic(t *testing.T, dut *ondatra.DUTDevice, ate *ondatra.ATEDevice, top gosnappi.Config) {
 	t.Helper()
 	capturePktsBeforeTraffic(t, dut, dutPortList)
-	time.Sleep(30 * time.Second)
+	time.Sleep(10 * time.Second)
 	ate.OTG().StartTraffic(t)
 	time.Sleep(time.Minute)
 	ate.OTG().StopTraffic(t)
-	time.Sleep(time.Minute)
+	time.Sleep(time.Second * 40)
 	otgutils.LogFlowMetrics(t, ate.OTG(), top)
 	otgutils.LogLAGMetrics(t, ate.OTG(), top)
 	otgutils.LogPortMetrics(t, ate.OTG(), top)

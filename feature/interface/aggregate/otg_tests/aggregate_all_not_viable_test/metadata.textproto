@@ -5,6 +5,20 @@ uuid: "2beaac46-9b7b-49c4-9bde-62ad530aa5c6"
 plan_id: "RT-5.7"
 description: "Aggregate Not Viable All"
 testbed: TESTBED_DUT_ATE_8LINKS
+
+platform_exceptions:  {
+  platform:  {
+    vendor:  NOKIA
+  }
+  deviations:  {
+    explicit_port_speed: true
+    explicit_interface_in_default_vrf: true
+    aggregate_atomic_update: true
+    interface_enabled: true
+    missing_value_for_defaults: true
+  }
+}
+
 platform_exceptions: {
   platform: {
     vendor: ARISTA
